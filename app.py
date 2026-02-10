@@ -13,9 +13,8 @@ class StreamlitLogger:
         self.context = context
         self.placeholder = log_placeholder
         
-    def log(self, message: str):
-        self.context.log(message)
-        # Update display immediately
+    def render(self):
+        # Update display immediately from context logs
         self.placeholder.text_area(
             "Live Logs", 
             value="\n".join(self.context.logs[-50:]),  # Show last 50 logs
@@ -77,11 +76,11 @@ def main():
                 # We need to monkeypath the instance method for this run
                 original_log = ctx.log
                 def ui_logging_wrapper(msg):
-                    original_log(msg)
-                    logger.log(msg) # Re-calls context.log internally but also updates UI
+                    original_log(msg) # Update internal list
+                    logger.render()   # Update UI
                 
-                # Actually, simpler: just use a lambda that calls both
-                ctx.log = lambda msg: logger.log(msg) # Overwrite instance method
+                # Assign the wrapper
+                ctx.log = ui_logging_wrapper
 
                 pipeline = Pipeline(ctx, st.session_state.token)
                 

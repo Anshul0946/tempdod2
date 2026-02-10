@@ -4,6 +4,7 @@ Replaces evaluator.py. Wires together file handling, processors, and mapping.
 """
 
 from pathlib import Path
+import time
 from .config import ProcessingContext, LLMProvider
 from .api_manager import APIManager
 from .file_handler import FileHandler
@@ -71,6 +72,7 @@ class Pipeline:
                 data = self.service_processor.process(service_imgs, provider)
                 if data:
                     self.context.set_service(sector, data)
+                time.sleep(1) # Pacing
 
             # B. Speed Tests
             speed_imgs = classified[sector].get("speed_test", [])
@@ -79,6 +81,7 @@ class Pipeline:
                 data = self.speed_processor.process(img_path, provider)
                 if data:
                     self.context.add_speed(sector, name, data)
+                time.sleep(1) # Pacing
 
             # C. Video Tests
             video_imgs = classified[sector].get("video_test", [])
@@ -87,6 +90,7 @@ class Pipeline:
                 data = self.video_processor.process(img_path, provider)
                 if data:
                     self.context.add_video(sector, name, data)
+                time.sleep(1) # Pacing
 
         # 3. Process Voice Tests
         self.context.log("\n[PHASE 3] Processing Voice Tests...")
@@ -96,6 +100,7 @@ class Pipeline:
             data = self.voice_processor.process(img_path, provider)
             if data:
                 self.context.add_voice(name, data)
+            time.sleep(1) # Pacing
 
         # 4. Map to Excel
         self.context.log("\n[PHASE 4] Mapping to Excel...")

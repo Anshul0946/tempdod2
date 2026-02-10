@@ -29,49 +29,60 @@ class SpeedProcessor:
 
     def process(self, image_path: str, provider: LLMProvider) -> Optional[SpeedTestData]:
         """
-        Process a single speed test image.
-        
-        Args:
-            image_path: Path to speed test screenshot
-            provider: LLM provider for reasoning model
-            
-        Returns:
-            Filled SpeedTestData schema or None on failure
+        Process a single speed test image through the full pipeline.
         """
         img_name = Path(image_path).stem
-        self.log(f"\n--- SPEED: {img_name} ---")
+        process_start = time.time()
+        self.log(f"\n{'─'*40}")
+        self.log(f"[SPEED] ▶ Processing: {img_name}")
+        self.log(f"[SPEED]   Path: {image_path}")
+        self.log(f"{'─'*40}")
 
         # Step 1: OCR
-        self.log(f"[SPEED] OCR: {img_name}")
+        step_start = time.time()
+        self.log(f"[SPEED] Step 1/4: OCR...")
         ocr_text = self.api.call_paddleocr(image_path)
+        step_time = time.time() - step_start
         if not ocr_text:
-            self.log(f"[SPEED] ERROR: No OCR text from {img_name}")
+            self.log(f"[SPEED] ✗ Step 1 FAILED: No OCR text from {img_name} ({step_time:.1f}s)")
             return None
-        self.log(f"[SPEED] OCR got {len(ocr_text)} chars")
-        time.sleep(0.5)
+        self.log(f"[SPEED] ✓ Step 1: OCR got {len(ocr_text)} chars ({step_time:.1f}s)")
+        self.log(f"[SPEED]   OCR Preview: {ocr_text[:150]}...")
 
         # Step 2: Filter
-        self.log(f"[SPEED] Filtering...")
+        step_start = time.time()
+        self.log(f"[SPEED] Step 2/4: Filtering...")
         filtered = self.filtration.filter_speed_text(ocr_text, provider)
+        step_time = time.time() - step_start
         if not filtered:
-            self.log(f"[SPEED] ERROR: Filtration failed for {img_name}")
+            self.log(f"[SPEED] ✗ Step 2 FAILED: Filtration returned nothing ({step_time:.1f}s)")
             return None
-        time.sleep(0.5)
+        self.log(f"[SPEED] ✓ Step 2: Filtered {len(filtered)} chars ({step_time:.1f}s)")
+        self.log(f"[SPEED]   Filtered: {filtered[:200]}")
 
         # Step 3: Validate
-        self.log(f"[SPEED] Validating...")
+        step_start = time.time()
+        self.log(f"[SPEED] Step 3/4: Validating...")
         validated = self.validation.validate_speed(filtered, provider)
+        step_time = time.time() - step_start
         if not validated:
-            self.log(f"[SPEED] ERROR: Validation failed for {img_name}")
+            self.log(f"[SPEED] ✗ Step 3 FAILED: Validation returned nothing ({step_time:.1f}s)")
             return None
-        time.sleep(0.5)
+        self.log(f"[SPEED] ✓ Step 3: Validated {len(validated)} chars ({step_time:.1f}s)")
+        self.log(f"[SPEED]   Validated: {validated[:200]}")
 
         # Step 4: Fill schema
-        self.log(f"[SPEED] Filling schema...")
+        step_start = time.time()
+        self.log(f"[SPEED] Step 4/4: Filling schema...")
         result = self.filling.fill_speed(validated, provider)
+        step_time = time.time() - step_start
+        total_time = time.time() - process_start
         if result:
-            self.log(f"[SPEED] ✓ {img_name} complete")
+            self.log(f"[SPEED] ✓ Step 4: Schema filled ({step_time:.1f}s)")
+            self.log(f"[SPEED]   Result: DL={result.download_mbps} UL={result.upload_mbps} Ping={result.ping_ms} Jitter={result.jitter_ms}")
+            self.log(f"[SPEED] ✅ {img_name} COMPLETE in {total_time:.1f}s")
         else:
-            self.log(f"[SPEED] ERROR: Schema filling failed for {img_name}")
+            self.log(f"[SPEED] ✗ Step 4 FAILED: Schema filling failed ({step_time:.1f}s)")
+            self.log(f"[SPEED] ❌ {img_name} FAILED after {total_time:.1f}s")
 
         return result

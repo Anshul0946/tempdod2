@@ -23,22 +23,7 @@ class FileHandler:
 
     def extract_and_classify(self, xlsx_path: str) -> Dict[str, Dict[str, List[str]]]:
         """
-        Extract images from Excel and classify them into a structured dict:
-        {
-            "alpha": {
-                "service": [path1, path2],
-                "speed_test": [path3, path4, ...],
-                "video_test": [path8],
-            },
-            "beta": { ... },
-            "gamma": { ... },
-            "voicetest": {
-                "voice": [path1, ...]
-            },
-        }
-        
-        Classification is done at extraction time using column position + image number.
-        This guarantees no downstream mixing.
+        Extract images from Excel and classify them into a structured dict.
         """
         self.context.log(f"Analyzing template file: {xlsx_path}")
 
@@ -53,6 +38,8 @@ class FileHandler:
         if not images:
             self.context.log("[WARN] No images found in workbook.")
             return {}
+        
+        self.context.log(f"Found {len(images)} raw images in workbook. Sorting by position...")
 
         # Sort images by location (top-left to bottom-right)
         images_with_locations = []
@@ -74,17 +61,22 @@ class FileHandler:
             "voicetest": {"voice": []},
         }
 
+        # Ensure output directory exists (CRITICAL FIX)
         output_folder = os.path.join(self.context.temp_dir, "images")
+        os.makedirs(output_folder, exist_ok=True)
+        self.context.log(f"Images will be saved to: {output_folder}")
+
         counters = {"alpha": 0, "beta": 0, "gamma": 0, "voicetest": 0, "unknown": 0}
 
-        for itm in images_sorted:
+        for i, itm in enumerate(images_sorted):
             col_index = itm["col"]
+            row_index = itm["row"]
 
             # Determine sector from column position
             sector = self._classify_sector(col_index)
             if sector == "unknown":
                 counters["unknown"] += 1
-                self.context.log(f"[WARN] Unknown sector for image at col {col_index}, skipping.")
+                self.context.log(f"[WARN] Image #{i+1} at Row {row_index}/Col {col_index} has unknown sector. Skipping.")
                 continue
 
             counters[sector] += 1
@@ -97,7 +89,7 @@ class FileHandler:
             else:
                 image_type = IMAGE_ROLES.get(img_number, "unknown")
                 if image_type == "unknown":
-                    self.context.log(f"[WARN] {sector} image #{img_number} has no defined role, skipping.")
+                    self.context.log(f"[WARN] {sector} image #{img_number} has no defined role (Count={img_number}), skipping.")
                     continue
                 filename = f"{sector}_{image_type}_{img_number}.png"
 
@@ -111,10 +103,12 @@ class FileHandler:
 
                 # Add to classified structure
                 classified[sector][image_type].append(out_path)
-                self.context.log(f"  ✓ {filename} → {sector}/{image_type}")
+                self.context.log(f"  ✓ Saved image: {filename} (Size: {pil.size})")
 
             except Exception as e:
                 self.context.log(f"[ERROR] Failed to save {filename}: {e}")
+                import traceback
+                self.context.log(traceback.format_exc())
 
         # Log summary
         for sector, types in classified.items():

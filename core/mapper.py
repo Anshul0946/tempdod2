@@ -4,6 +4,7 @@ mapper.py — Maps extracted data to Excel cells using BOLD+RED expressions.
 
 import re
 import json
+import time
 import openpyxl
 from typing import Any, List
 from .config import ProcessingContext
@@ -39,7 +40,7 @@ class Mapper:
         current_obj = data_map[base_key]
 
         # Parse brackets: ['key'] or ["key"]
-        keys = re.findall(r"\[['\"]([^'\"]+)['\"]\]", rest)
+        keys = re.findall(r"\[['\"](.*?)['\"]\]", rest)
 
         for k in keys:
             if isinstance(current_obj, dict):
@@ -59,15 +60,18 @@ class Mapper:
         return current_obj
 
     def map_to_excel(self, xlsx_path: str):
-        self.context.log("[MAPPER] Scanning workbook for BOLD+RED expressions...")
+        start = time.time()
+        self.context.log("[MAPPER] ▶ Scanning workbook for BOLD+RED expressions...")
+        
         try:
             wb = openpyxl.load_workbook(xlsx_path)
             sheet = wb.active
+            self.context.log(f"[MAPPER]   Workbook loaded: {sheet.max_row} rows × {sheet.max_column} cols")
 
             cells_to_update = []
+            bold_red_found = 0
+            resolution_failures = []
 
-            # Limit scan range for performance
-            # Assuming template won't exceed 20 columns or 200 rows for mapping references
             for row in sheet.iter_rows(min_row=1, max_row=sheet.max_row, min_col=1, max_col=20):
                 for cell in row:
                     val = cell.value
@@ -75,16 +79,14 @@ class Mapper:
                         continue
 
                     # Check for Red Bold
-                    # Standard Red is FF0000. Some Excel versions might vary slightly, but this is the tempdod1 standard.
                     font = cell.font
                     if not font or not font.bold:
                         continue
                     col = font.color
-                    # Check RGB or theme color if applicable (mostly RGB for custom RED)
-                    # We look for "FF0000" at the end of the hex string (ignoring alpha channel if present)
                     if not col or not col.rgb or (isinstance(col.rgb, str) and str(col.rgb).upper()[-6:] != "FF0000"):
-                        # Double check if it's strictly red
                         continue
+
+                    bold_red_found += 1
 
                     # Clean expression
                     expr = val.strip()
@@ -95,21 +97,38 @@ class Mapper:
                     resolved_val = self.resolve_expression(expr)
 
                     if resolved_val is not None:
-                        cells_to_update.append((cell, resolved_val))
+                        cells_to_update.append((cell, resolved_val, expr))
+                    else:
+                        resolution_failures.append((cell.coordinate, expr))
             
+            self.context.log(f"[MAPPER]   Found {bold_red_found} BOLD+RED cells")
+            self.context.log(f"[MAPPER]   Resolved: {len(cells_to_update)} / Unresolved: {len(resolution_failures)}")
+
+            # Log unresolved expressions for debugging
+            if resolution_failures:
+                self.context.log(f"[MAPPER]   ⚠ Unresolved expressions:")
+                for coord, expr in resolution_failures[:10]:  # Cap at 10
+                    self.context.log(f"[MAPPER]     Cell {coord}: \"{expr}\"")
+                if len(resolution_failures) > 10:
+                    self.context.log(f"[MAPPER]     ... and {len(resolution_failures) - 10} more")
+
             # Apply updates
             count = 0
-            for cell, val in cells_to_update:
+            for cell, val, expr in cells_to_update:
+                old_val = cell.value
                 if isinstance(val, (dict, list)):
                     cell.value = json.dumps(val)
                 else:
                     cell.value = val
                 count += 1
-
-            # Removed image deletion line to preserve original images in output
+                self.context.log(f"[MAPPER]   ✓ {cell.coordinate}: \"{expr}\" → {repr(cell.value)[:80]}")
 
             wb.save(xlsx_path)
-            self.context.log(f"[MAPPER] Updated {count} cells in {xlsx_path}")
+            elapsed = time.time() - start
+            self.context.log(f"[MAPPER] ✅ Updated {count} cells, saved workbook ({elapsed:.1f}s)")
 
         except Exception as e:
-            self.context.log(f"[ERROR] Mapping failed: {e}")
+            elapsed = time.time() - start
+            self.context.log(f"[MAPPER] ✗ MAPPING FAILED: {type(e).__name__}: {e} ({elapsed:.1f}s)")
+            import traceback
+            self.context.log(f"[MAPPER]   Traceback: {traceback.format_exc()}")

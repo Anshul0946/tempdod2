@@ -27,7 +27,7 @@ class Pipeline:
 
     def __init__(self, context: ProcessingContext, api_key: str):
         self.context = context
-        self.api = APIManager(api_key)
+        self.api = APIManager(api_key, context.log)
         self.file_handler = FileHandler(context)
         self.mapper = Mapper(context)
 

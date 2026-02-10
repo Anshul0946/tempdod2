@@ -5,6 +5,7 @@ NEVER removes values — always guesses the closest valid value.
 """
 
 import json
+import time
 from typing import Optional
 from ..api_manager import APIManager
 from ..config import LLMProvider
@@ -76,11 +77,42 @@ class ValidationAgent:
         self.api = api
         self.log = log_fn or (lambda msg: None)
 
+    def _log_validation_result(self, test_type: str, input_json: str, result: Optional[str], elapsed: float):
+        """Log validation input/output comparison."""
+        if result:
+            try:
+                in_data = json.loads(input_json) if isinstance(input_json, str) else {}
+                out_data = json.loads(result) if isinstance(result, str) else {}
+                in_keys = set(in_data.keys()) if isinstance(in_data, dict) else set()
+                out_keys = set(out_data.keys()) if isinstance(out_data, dict) else set()
+                
+                self.log(f"[VALIDATE] ✓ {test_type} validated ({elapsed:.1f}s)")
+                self.log(f"[VALIDATE]   Input keys:  {sorted(in_keys)}")
+                self.log(f"[VALIDATE]   Output keys: {sorted(out_keys)}")
+                
+                # Show corrected values
+                if isinstance(in_data, dict) and isinstance(out_data, dict):
+                    corrections = []
+                    for key in out_keys:
+                        in_val = in_data.get(key)
+                        out_val = out_data.get(key)
+                        if in_val is not None and str(in_val) != str(out_val):
+                            corrections.append(f"{key}: {in_val} → {out_val}")
+                    if corrections:
+                        self.log(f"[VALIDATE]   Corrections: {', '.join(corrections[:5])}")
+                    else:
+                        self.log(f"[VALIDATE]   No corrections needed")
+            except Exception:
+                self.log(f"[VALIDATE] ✓ {test_type} validated ({elapsed:.1f}s, {len(result)} chars)")
+        else:
+            self.log(f"[VALIDATE] ✗ {test_type} validation FAILED ({elapsed:.1f}s)")
+
     def validate_service(self, filtered_json: str, provider: LLMProvider) -> Optional[str]:
         """Validate and correct service data parameters."""
+        self.log(f"[VALIDATE] Service validation starting (input: {len(filtered_json)} chars)")
+        start = time.time()
         param_info = _format_param_metadata(SERVICE_PARAMS)
 
-        # Strict telecom validation rules
         prompt = f"""You are a telecom data validation expert.
         
 CRITICAL VALIDATION RULES:
@@ -125,16 +157,15 @@ MAPPING:
 Return ONLY a JSON object with the SCHEMA fields and CORRECTED values.
 Example: {{"nr_pci": 150, "lte_pci": 320, ...}}"""
 
-        self.log("[VALIDATE] Running service data validation...")
         result = self.api.call_reasoning(prompt, provider)
-        if result:
-            self.log("[VALIDATE] Service data validated successfully")
-        else:
-            self.log("[VALIDATE] WARNING: Service validation returned no result")
+        elapsed = time.time() - start
+        self._log_validation_result("Service", filtered_json, result, elapsed)
         return result
 
     def validate_speed(self, filtered_json: str, provider: LLMProvider) -> Optional[str]:
         """Validate and correct speed test parameters."""
+        self.log(f"[VALIDATE] Speed validation starting (input: {len(filtered_json)} chars)")
+        start = time.time()
         param_info = _format_param_metadata(SPEED_TEST_PARAMS)
 
         prompt = f"""You are a telecom data validation expert and OCR error correction specialist.
@@ -168,16 +199,15 @@ ADDITIONAL SPEED TEST RULES:
 Return ONLY a JSON object with schema field names and corrected numeric values:
 {{"download_mbps": 382, "upload_mbps": 95.2, "ping_ms": 44, "jitter_ms": 7}}"""
 
-        self.log("[VALIDATE] Running speed test validation...")
         result = self.api.call_reasoning(prompt, provider)
-        if result:
-            self.log("[VALIDATE] Speed test data validated successfully")
-        else:
-            self.log("[VALIDATE] WARNING: Speed validation returned no result")
+        elapsed = time.time() - start
+        self._log_validation_result("Speed", filtered_json, result, elapsed)
         return result
 
     def validate_video(self, filtered_json: str, provider: LLMProvider) -> Optional[str]:
         """Validate and correct video test parameters."""
+        self.log(f"[VALIDATE] Video validation starting (input: {len(filtered_json)} chars)")
+        start = time.time()
         param_info = _format_param_metadata(VIDEO_TEST_PARAMS)
 
         prompt = f"""You are a telecom data validation expert and OCR error correction specialist.
@@ -209,16 +239,15 @@ ADDITIONAL VIDEO TEST RULES:
 Return ONLY a JSON object with schema field names and corrected values:
 {{"max_resolution": "2160p", "load_time_ms": 985, "buffering_percentage": 0}}"""
 
-        self.log("[VALIDATE] Running video test validation...")
         result = self.api.call_reasoning(prompt, provider)
-        if result:
-            self.log("[VALIDATE] Video test data validated successfully")
-        else:
-            self.log("[VALIDATE] WARNING: Video validation returned no result")
+        elapsed = time.time() - start
+        self._log_validation_result("Video", filtered_json, result, elapsed)
         return result
 
     def validate_voice(self, filtered_json: str, provider: LLMProvider) -> Optional[str]:
         """Validate and correct voice call parameters."""
+        self.log(f"[VALIDATE] Voice validation starting (input: {len(filtered_json)} chars)")
+        start = time.time()
         param_info = _format_param_metadata(VOICE_TEST_PARAMS)
 
         prompt = f"""You are a telecom data validation expert and OCR error correction specialist.
@@ -252,10 +281,7 @@ ADDITIONAL VOICE TEST RULES:
 Return ONLY a JSON object with schema field names and corrected values:
 {{"phone_number": "(312) 774-3128", "call_duration_seconds": 12, "call_status": "Connected", "time": "00:12"}}"""
 
-        self.log("[VALIDATE] Running voice call validation...")
         result = self.api.call_reasoning(prompt, provider)
-        if result:
-            self.log("[VALIDATE] Voice call data validated successfully")
-        else:
-            self.log("[VALIDATE] WARNING: Voice validation returned no result")
+        elapsed = time.time() - start
+        self._log_validation_result("Voice", filtered_json, result, elapsed)
         return result

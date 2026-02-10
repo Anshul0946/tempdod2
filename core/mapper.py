@@ -96,10 +96,6 @@ class Mapper:
 
                     if resolved_val is not None:
                         cells_to_update.append((cell, resolved_val))
-                    else:
-                        # If resolution fails, we previously set to NULL.
-                        # Now we just leave it or set to "NULL" string to indicate missing data.
-                        cell.value = "NULL"
             
             # Apply updates
             count = 0

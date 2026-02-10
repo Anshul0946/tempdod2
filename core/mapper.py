@@ -110,9 +110,7 @@ class Mapper:
                     cell.value = val
                 count += 1
 
-            # Remove ALL images from the sheet to produce a clean data-only file
-            # This is often desired in final reports to reduce file size
-            sheet._images = []
+            # Removed image deletion line to preserve original images in output
 
             wb.save(xlsx_path)
             self.context.log(f"[MAPPER] Updated {count} cells in {xlsx_path}")

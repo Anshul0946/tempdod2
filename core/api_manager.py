@@ -18,8 +18,9 @@ from .config import LLMProvider
 class APIManager:
     """Handles all external API interactions."""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, logger=None):
         self.api_key = api_key
+        self.log = logger or (lambda msg: print(msg))
 
     # ─── PaddleOCR ───
     def call_paddleocr(self, image_path: str) -> Optional[str]:
@@ -31,11 +32,11 @@ class APIManager:
             with open(image_path, "rb") as f:
                 image_b64 = base64.b64encode(f.read()).decode("utf-8")
         except Exception as e:
-            print(f"[OCR] Cannot read {image_path}: {e}")
+            self.log(f"[OCR] Cannot read {image_path}: {e}")
             return None
 
         if len(image_b64) >= 180_000:
-            print(f"[OCR] Image too large for PaddleOCR: {Path(image_path).name}")
+            self.log(f"[OCR] Image too large for PaddleOCR: {Path(image_path).name}")
             return None
 
         headers = {
@@ -72,16 +73,16 @@ class APIManager:
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 if attempt < 2:
-                    print(f"[OCR] Timeout attempt {attempt}, retrying...")
+                    self.log(f"[OCR] Timeout attempt {attempt}, retrying...")
                     time.sleep(2)
                     continue
-                print(f"[OCR] Failed after retries: {e}")
+                self.log(f"[OCR] Failed after retries: {e}")
                 return None
             except requests.exceptions.HTTPError as e:
-                print(f"[OCR] HTTP Error: {e}")
+                self.log(f"[OCR] HTTP Error: {e}")
                 return None
             except Exception as e:
-                print(f"[OCR] Unexpected error: {e}")
+                self.log(f"[OCR] Unexpected error: {e}")
                 return None
 
         return None
@@ -118,22 +119,22 @@ class APIManager:
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
                 if attempt < 2:
-                    print(f"[REASONING] Timeout attempt {attempt}, retrying...")
+                    self.log(f"[REASONING] Timeout attempt {attempt}, retrying...")
                     time.sleep(2)
                     continue
-                print(f"[REASONING] Failed after retries: {e}")
+                self.log(f"[REASONING] Failed after retries: {e}")
                 return None
             except requests.exceptions.HTTPError as e:
                 if hasattr(e, 'response') and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
-                    print(f"[REASONING] Client error {e.response.status_code}: {e}")
+                    self.log(f"[REASONING] Client error {e.response.status_code}: {e}")
                     return None
                 if attempt < 2:
                     time.sleep(2)
                     continue
-                print(f"[REASONING] HTTP Error: {e}")
+                self.log(f"[REASONING] HTTP Error: {e}")
                 return None
             except Exception as e:
-                print(f"[REASONING] Unexpected error: {e}")
+                self.log(f"[REASONING] Unexpected error: {e}")
                 return None
 
         return None

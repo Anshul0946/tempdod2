@@ -48,6 +48,9 @@ Return ONLY a JSON object like: {{"NR_BAND": "977", "RSRP": "-73", ...}}"""
         result = self.api.call_reasoning(prompt, provider)
         if result:
             self.log(f"[FILTER] Service: extracted parameters from OCR")
+        else:
+            self.log(f"[FILTER] ERROR: Service filtration failed. Raw OCR len: {len(raw_ocr)}")
+            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
         return result
 
     def filter_speed_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
@@ -77,6 +80,9 @@ Return ONLY a JSON object like: {{"Download Mbps": "382", "Upload Mbps": "95.2",
         result = self.api.call_reasoning(prompt, provider)
         if result:
             self.log(f"[FILTER] Speed: extracted parameters from OCR")
+        else:
+            self.log(f"[FILTER] ERROR: Speed filtration failed. Raw OCR len: {len(raw_ocr)}")
+            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
         return result
 
     def filter_video_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
@@ -102,6 +108,9 @@ Return ONLY a JSON object like: {{"MAX RESOLUTION": "2160p", "Load Time": "985",
         result = self.api.call_reasoning(prompt, provider)
         if result:
             self.log(f"[FILTER] Video: extracted parameters from OCR")
+        else:
+            self.log(f"[FILTER] ERROR: Video filtration failed. Raw OCR len: {len(raw_ocr)}")
+            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
         return result
 
     def filter_voice_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
@@ -128,4 +137,7 @@ Return ONLY a JSON object like: {{"phone_number": "(312) 774-3128", "call_durati
         result = self.api.call_reasoning(prompt, provider)
         if result:
             self.log(f"[FILTER] Voice: extracted parameters from OCR")
+        else:
+            self.log(f"[FILTER] ERROR: Voice filtration failed. Raw OCR len: {len(raw_ocr)}")
+            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
         return result

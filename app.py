@@ -1,19 +1,11 @@
 import streamlit as st
 import tempfile
 import os
-import threading
 import time
 from pathlib import Path
-from core.config import (
-    ProcessingContext, API_BASE, LLMProvider,
-    VISION_MODEL_DEFAULT, REASONING_MODEL_DEFAULT
-)
-from core.api_manager import APIManager
-from core.file_handler import FileHandler
-from core.extractor import Extractor
-from core.mapper import Mapper
-from core.evaluator import Evaluator
-
+from core.config import ProcessingContext
+from core.pipeline import Pipeline
+from core.constants import REASONING_MODEL_DEFAULT
 
 class StreamlitLogger:
     """Custom logger that writes to both context and a live display."""
@@ -34,8 +26,8 @@ class StreamlitLogger:
 
 def main():
     st.set_page_config(page_title="Cellular Processor", layout="wide")
-    st.title("🔬 Cellular Template Processor")
-    st.caption("Vision + Reasoning Pipeline")
+    st.title("🔬 5G DOD Processor (Refactored)")
+    st.caption("PaddleOCR + DeepSeek-v3 Pipeline")
 
     # Session State
     if "context" not in st.session_state:
@@ -43,15 +35,16 @@ def main():
     
     # Sidebar
     st.sidebar.header("🔑 API Key")
-    token = st.sidebar.text_input("Enter API Key", type="password")
+    token = st.sidebar.text_input("NVIDIA API Key", type="password")
     
-    if st.sidebar.button("Validate"):
-        if token and len(token) > 20:
-            st.session_state.api_valid = True
-            st.session_state.token = token
-            st.sidebar.success("✅ Valid")
-        else:
-            st.sidebar.error("❌ Invalid")
+    if token and len(token) > 20:
+        st.session_state.api_valid = True
+        st.session_state.token = token
+        st.sidebar.success("✅ Valid Key")
+    else:
+        st.session_state.api_valid = False
+        if token:
+            st.sidebar.error("❌ Invalid Key")
 
     if st.sidebar.button("🔄 Reset"):
         st.session_state.context = ProcessingContext()
@@ -61,11 +54,7 @@ def main():
     if st.session_state.get("api_valid"):
         uploaded = st.file_uploader("📁 Upload Excel Template", type=["xlsx"])
         
-        col1, col2 = st.columns(2)
-        with col1:
-            vision = st.text_input("Vision Model", value=VISION_MODEL_DEFAULT)
-        with col2:
-            reasoning = st.text_input("Reasoning Model", value=REASONING_MODEL_DEFAULT)
+        reasoning_model = st.text_input("Reasoning Model", value=REASONING_MODEL_DEFAULT)
 
         if uploaded:
             if st.button("🚀 Process", type="primary"):
@@ -78,43 +67,54 @@ def main():
                 # Create context
                 ctx = ProcessingContext()
                 st.session_state.context = ctx
+                ctx.temp_dir = temp_dir
+                
+                # Setup Logger and Pipeline
+                log_placeholder = st.empty()
+                logger = StreamlitLogger(ctx, log_placeholder)
+                
+                # Hijack context.log to write to UI
+                # We need to monkeypath the instance method for this run
+                original_log = ctx.log
+                def ui_logging_wrapper(msg):
+                    original_log(msg)
+                    logger.log(msg) # Re-calls context.log internally but also updates UI
+                
+                # Actually, simpler: just use a lambda that calls both
+                ctx.log = lambda msg: logger.log(msg) # Overwrite instance method
 
-                # Providers
-                pv = LLMProvider(name="Vision", api_key=st.session_state.token, 
-                                 model=vision, base_url=API_BASE)
-                pr = LLMProvider(name="Reasoning", api_key=st.session_state.token,
-                                 model=reasoning, base_url=API_BASE)
-
-                # Components
-                api = APIManager(st.session_state.token)
-                fh = FileHandler(ctx)
-                fh.setup_temp_dir(temp_dir)
-                ext = Extractor(api, ctx)
-                mapper = Mapper(ctx, api)
-                ev = Evaluator(ctx, api, fh, ext, mapper)
-
+                pipeline = Pipeline(ctx, st.session_state.token)
+                
                 # Progress display
                 progress = st.progress(0, text="Starting...")
-                log_area = st.empty()
                 
                 try:
-                    ctx.log("Starting processing...")
-                    progress.progress(5, text="Extracting images...")
+                    ctx.log("Starting processing pipeline...")
+                    progress.progress(10, text="Pipeline Running...")
                     
                     # Run workflow
-                    result = ev.process_workflow(file_path, pv, pr)
+                    result_path = pipeline.run(file_path, reasoning_model)
                     
                     progress.progress(100, text="Complete!")
                     
-                    if result:
-                        st.success("✅ Done!")
-                        with open(result, "rb") as f:
-                            st.download_button("📥 Download", f, 
-                                             file_name="output.xlsx",
-                                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    if result_path and os.path.exists(result_path):
+                        st.success("✅ Done! Download your processed file below.")
+                        
+                        # Read file for download
+                        with open(result_path, "rb") as f:
+                            file_data = f.read()
+                            
+                        st.download_button(
+                            "📥 Download Results", 
+                            file_data, 
+                            file_name=f"processed_{uploaded.name}",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                        )
                 except Exception as e:
                     st.error(f"❌ Error: {e}")
-                    ctx.log(f"ERROR: {e}")
+                    ctx.log(f"CRITICAL ERROR: {e}")
+                    import traceback
+                    ctx.log(traceback.format_exc())
 
     # Always show logs
     st.markdown("---")

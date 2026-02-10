@@ -1,12 +1,17 @@
+"""
+file_handler.py — Extracts images from Excel and classifies them by sector + type.
+Returns a structured dictionary so downstream processors never mix images.
+"""
+
 import os
 import io
-import shutil
 import openpyxl
 from PIL import Image
-from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List
+
 from .config import ProcessingContext
-from .api_manager import APIManager
+from .constants import SECTOR_COLUMN_RANGES, IMAGE_ROLES
+
 
 class FileHandler:
     def __init__(self, context: ProcessingContext):
@@ -16,23 +21,38 @@ class FileHandler:
         self.context.temp_dir = temp_dir
         os.makedirs(os.path.join(temp_dir, "images"), exist_ok=True)
 
-    def extract_images_from_excel(self, xlsx_path: str) -> List[str]:
+    def extract_and_classify(self, xlsx_path: str) -> Dict[str, Dict[str, List[str]]]:
         """
-        Extracts images from Excel and saves them to temp/images.
-        Returns list of saved image paths.
+        Extract images from Excel and classify them into a structured dict:
+        {
+            "alpha": {
+                "service": [path1, path2],
+                "speed_test": [path3, path4, ...],
+                "video_test": [path8],
+            },
+            "beta": { ... },
+            "gamma": { ... },
+            "voicetest": {
+                "voice": [path1, ...]
+            },
+        }
+        
+        Classification is done at extraction time using column position + image number.
+        This guarantees no downstream mixing.
         """
         self.context.log(f"Analyzing template file: {xlsx_path}")
+
         try:
             wb = openpyxl.load_workbook(xlsx_path)
-            sheet = wb.active # Assuming active sheet
+            sheet = wb.active
         except Exception as e:
             self.context.log(f"[ERROR] Could not open Excel file: {e}")
-            return []
+            return {}
 
         images = getattr(sheet, "_images", [])
         if not images:
             self.context.log("[WARN] No images found in workbook.")
-            return []
+            return {}
 
         # Sort images by location (top-left to bottom-right)
         images_with_locations = []
@@ -45,44 +65,72 @@ class FileHandler:
             images_with_locations.append({"image": image, "row": row, "col": col})
 
         images_sorted = sorted(images_with_locations, key=lambda i: (i["row"], i["col"]))
-        
-        saved_paths = []
+
+        # Initialize classified structure
+        classified = {
+            "alpha": {"service": [], "speed_test": [], "video_test": []},
+            "beta": {"service": [], "speed_test": [], "video_test": []},
+            "gamma": {"service": [], "speed_test": [], "video_test": []},
+            "voicetest": {"voice": []},
+        }
+
         output_folder = os.path.join(self.context.temp_dir, "images")
-        
-        # Heuristic naming based on column index (legacy logic)
         counters = {"alpha": 0, "beta": 0, "gamma": 0, "voicetest": 0, "unknown": 0}
-        
+
         for itm in images_sorted:
             col_index = itm["col"]
-            if 0 <= col_index < 4:
-                sector = "alpha"
-            elif 4 <= col_index < 8:
-                sector = "beta"
-            elif 8 <= col_index < 12:
-                sector = "gamma"
-            elif 12 <= col_index < 18:
-                sector = "voicetest"
-            else:
-                sector = "unknown"
-                
+
+            # Determine sector from column position
+            sector = self._classify_sector(col_index)
+            if sector == "unknown":
+                counters["unknown"] += 1
+                self.context.log(f"[WARN] Unknown sector for image at col {col_index}, skipping.")
+                continue
+
             counters[sector] += 1
-            filename = f"{sector}_image_{counters[sector]}.png"
+            img_number = counters[sector]
+
+            # Determine image type
+            if sector == "voicetest":
+                image_type = "voice"
+                filename = f"voicetest_voice_{img_number}.png"
+            else:
+                image_type = IMAGE_ROLES.get(img_number, "unknown")
+                if image_type == "unknown":
+                    self.context.log(f"[WARN] {sector} image #{img_number} has no defined role, skipping.")
+                    continue
+                filename = f"{sector}_{image_type}_{img_number}.png"
+
             out_path = os.path.join(output_folder, filename)
-            
+
+            # Save image
             try:
                 img_data = itm["image"]._data()
                 pil = Image.open(io.BytesIO(img_data))
                 pil.save(out_path, "PNG")
-                saved_paths.append(out_path)
-                self.context.log(f"  - Extracted {filename}")
+
+                # Add to classified structure
+                classified[sector][image_type].append(out_path)
+                self.context.log(f"  ✓ {filename} → {sector}/{image_type}")
+
             except Exception as e:
                 self.context.log(f"[ERROR] Failed to save {filename}: {e}")
 
-        return saved_paths
+        # Log summary
+        for sector, types in classified.items():
+            for itype, paths in types.items():
+                if paths:
+                    self.context.log(f"  [{sector.upper()}] {itype}: {len(paths)} images")
 
-    def get_image_path(self, name: str) -> Optional[str]:
-        """Simple lookup for an image in the temp folder."""
-        path = os.path.join(self.context.temp_dir, "images", f"{name}.png")
-        if os.path.exists(path):
-            return path
+        return classified
+
+    def _classify_sector(self, col_index: int) -> str:
+        """Classify column index into sector name."""
+        for sector, (lo, hi) in SECTOR_COLUMN_RANGES.items():
+            if lo <= col_index <= hi:
+                return sector
+        return "unknown"
+
+    def get_image_path(self, _):
+        """Deprecated method stub to prevent crashes if called during refactor."""
         return None

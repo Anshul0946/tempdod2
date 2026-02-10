@@ -80,22 +80,33 @@ class ValidationAgent:
         """Validate and correct service data parameters."""
         param_info = _format_param_metadata(SERVICE_PARAMS)
 
-        prompt = f"""You are a telecom data validation expert and OCR error correction specialist.
+        # Strict telecom validation rules
+        prompt = f"""You are a telecom data validation expert.
+        
+CRITICAL VALIDATION RULES:
+1. **PCI (Physical Cell ID)**: MUST be an integer between 0 and 1008. 
+   - If OCR shows negative (e.g., "-150"), ASSUME IT IS POSITIVE (correct to "150").
+   - If OCR shows "l50", correct to "150".
+2. **EARFCN / NR_ARFCN**: MUST be a positive integer.
+3. **BAND / NR_BAND**: Must be a valid integer band number (e.g., 2, 66, 71, 41, 77, 48).
+   - If "T2", return 2. If "B66", return 66.
+4. **Signal Metrics**:
+   - **RSRP**: Range -140 to -40 dBm.
+   - **RSRQ**: Range -40 to -3 dB.
+   - **SINR**: Range -10 to 40 dB.
+   - If values are outside these ranges, try to fix common OCR errors (e.g., missing negative sign).
 
-You are validating cellular network SERVICE data extracted by OCR.
+5. **NEVER RETURN NULL** if a value can be recovered. Guess the most likely valid value.
 
-PARAMETER DEFINITIONS (name, type, valid range, unit, sample value):
+PARAMETER DEFINITIONS:
 {param_info}
 
 {VALIDATION_RULES}
 
-REFERENCE — what correct service data looks like:
-{SAMPLE_SERVICE_OCR}
-
-FILTERED DATA TO VALIDATE:
+FILTERED DATA:
 {filtered_json}
 
-Map the input parameter names to the schema field names:
+MAPPING:
 - NR_ARFCN / NR ARFCN → nr_arfcn
 - NR_BAND / NR BAND → nr_band
 - NR_PCI / NR PCI → nr_pci
@@ -103,16 +114,16 @@ Map the input parameter names to the schema field names:
 - NRSG_RSRP / NR_ANT MAX RSRP → nr5g_rsrp
 - NRSG_RSRQ → nr5g_rsrq
 - NRSG_SINR → nr5g_sinr
-- BAND → lte_band (extract number from "T2" → 2)
+- BAND → lte_band
 - EARFCN → lte_earfcn
-- PCI → lte_pci (the standalone "PCI" not "NR_PCI")
-- BW → lte_bw (the standalone "BW" not "NR_BW")
-- RSRP → lte_rsrp (the standalone "RSRP" not "NRSG_RSRP")
+- PCI → lte_pci
+- BW → lte_bw
+- RSRP → lte_rsrp
 - RSRQ → lte_rsrq
 - SNR → lte_sinr
 
-Return ONLY a JSON object with the SCHEMA field names as keys and corrected numeric values:
-{{"nr_arfcn": 632736, "nr_band": 977, "nr_pci": 966, "nr_bw": 70, "nr5g_rsrp": -93, "nr5g_rsrq": -11, "nr5g_sinr": 230, "lte_band": 2, "lte_earfcn": 5110, "lte_pci": 320, "lte_bw": 10, "lte_rsrp": -73, "lte_rsrq": -12, "lte_sinr": 106}}"""
+Return ONLY a JSON object with the SCHEMA fields and CORRECTED values.
+Example: {{"nr_pci": 150, "lte_pci": 320, ...}}"""
 
         self.log("[VALIDATE] Running service data validation...")
         result = self.api.call_reasoning(prompt, provider)

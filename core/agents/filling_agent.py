@@ -5,6 +5,7 @@ Takes corrected data from the validation agent and produces schema-ready JSON.
 
 import json
 import re
+import time
 from typing import Optional
 from ..api_manager import APIManager
 from ..config import LLMProvider, ServiceData, SpeedTestData, VideoTestData, VoiceCallData
@@ -46,6 +47,7 @@ class FillingAgent:
         try:
             data = json.loads(validated_json)
             if not isinstance(data, dict):
+                self.log(f"[FILL]   Direct parse: JSON is not a dict (type: {type(data).__name__})")
                 return None
 
             # Clean numeric values
@@ -57,176 +59,158 @@ class FillingAgent:
                 else:
                     cleaned[key] = self._clean_number(value)
 
-            return schema_cls(**cleaned)
-        except Exception:
+            self.log(f"[FILL]   Direct parse: cleaned {len(cleaned)} fields: {list(cleaned.keys())}")
+            result = schema_cls(**cleaned)
+            self.log(f"[FILL]   Direct parse: ✓ Schema constructed successfully")
+            return result
+        except Exception as e:
+            self.log(f"[FILL]   Direct parse failed: {type(e).__name__}: {e}")
             return None
 
     def fill_service(self, validated_json: str, provider: LLMProvider) -> Optional[ServiceData]:
-        """Fill ServiceData schema from validated data."""
-        self.log("[FILL] Filling service data schema...")
+        """Fill ServiceData schema using AI Reasoning."""
+        self.log(f"[FILL] Filling ServiceData (input: {len(validated_json)} chars)...")
+        start = time.time()
 
-        # Try direct parse first (fast path)
-        result = self._try_direct_parse(validated_json, ServiceData)
-        if result:
-            nulls = [k for k, v in result.model_dump().items() if v is None]
-            if nulls:
-                self.log(f"[FILL] WARNING: Service has null fields: {nulls}")
-            else:
-                self.log(f"[FILL] Service schema filled successfully (all fields populated)")
-            return result
-
-        # Fallback: use reasoning model
-        self.log("[FILL] Direct parse failed, using reasoning model...")
-        prompt = f"""Convert this validated telecom data into the exact ServiceData schema.
-
-VALIDATED DATA:
+        prompt = f"""You are a telecom data specialist. Map this validated input data into the EXACT ServiceData schema.
+        
+INPUT DATA:
 {validated_json}
 
-REQUIRED OUTPUT SCHEMA (all values must be numbers, no nulls):
-{{
-    "nr_arfcn": <int>,
-    "nr_band": <int>,
-    "nr_pci": <int>,
-    "nr_bw": <int>,
-    "nr5g_rsrp": <float, negative>,
-    "nr5g_rsrq": <float, usually negative>,
-    "nr5g_sinr": <float>,
-    "lte_band": <int>,
-    "lte_earfcn": <int>,
-    "lte_pci": <int>,
-    "lte_bw": <int>,
-    "lte_rsrp": <float, negative>,
-    "lte_rsrq": <float, usually negative>,
-    "lte_sinr": <float>
-}}
+INSTRUCTIONS:
+1. Map input keys to the required schema keys intelligently (e.g., "NR_BAND" -> "nr_band").
+2. Ensure all values are numeric (float/int).
+3. Handle any minor naming mismatches using your knowledge of telecom parameters.
+4. If a value is missing or null, leave it as null (do not invent data).
 
-Return ONLY the JSON object with numeric values."""
+REQUIRED OUTPUT SCHEMA (JSON only, no markdown):
+{{
+    "nr_arfcn": <int or null>,
+    "nr_band": <int or null>,
+    "nr_pci": <int or null>,
+    "nr_bw": <int or null>,
+    "nr5g_rsrp": <float or null>,
+    "nr5g_rsrq": <float or null>,
+    "nr5g_sinr": <float or null>,
+    "lte_band": <int or null>,
+    "lte_earfcn": <int or null>,
+    "lte_pci": <int or null>,
+    "lte_bw": <int or null>,
+    "lte_rsrp": <float or null>,
+    "lte_rsrq": <float or null>,
+    "lte_sinr": <float or null>
+}}"""
 
         json_str = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
         if json_str:
+            self.log(f"[FILL]   AI response: {len(json_str)} chars ({elapsed:.1f}s)")
             result = self._try_direct_parse(json_str, ServiceData)
             if result:
-                self.log("[FILL] Service schema filled via reasoning model")
+                self.log(f"[FILL] ✓ Service schema filled ({elapsed:.1f}s)")
                 return result
 
-        self.log("[FILL] ERROR: Could not fill service schema")
+        self.log(f"[FILL] ✗ Could not fill service schema ({elapsed:.1f}s)")
         return None
 
     def fill_speed(self, validated_json: str, provider: LLMProvider) -> Optional[SpeedTestData]:
-        """Fill SpeedTestData schema from validated data."""
-        self.log("[FILL] Filling speed test schema...")
+        """Fill SpeedTestData schema using AI Reasoning."""
+        self.log(f"[FILL] Filling SpeedTestData (input: {len(validated_json)} chars)...")
+        start = time.time()
 
-        result = self._try_direct_parse(validated_json, SpeedTestData)
-        if result:
-            nulls = [k for k, v in result.model_dump().items() if v is None]
-            if nulls:
-                self.log(f"[FILL] WARNING: Speed test has null fields: {nulls}")
-            else:
-                self.log(f"[FILL] Speed test schema filled successfully")
-            return result
+        prompt = f"""You are a data entry specialist. Map this validated input data into the EXACT SpeedTestData schema.
 
-        # Fallback
-        self.log("[FILL] Direct parse failed, using reasoning model...")
-        prompt = f"""Convert this validated speed test data into the exact SpeedTestData schema.
-
-VALIDATED DATA:
+INPUT DATA:
 {validated_json}
 
-REQUIRED OUTPUT SCHEMA (all values must be positive numbers):
-{{
-    "download_mbps": <float>,
-    "upload_mbps": <float>,
-    "ping_ms": <float>,
-    "jitter_ms": <float>
-}}
+INSTRUCTIONS:
+1. Map input keys to the required schema keys (e.g., "Download Mbps" -> "download_mbps").
+2. Ensure all values are numeric.
+3. Handle standard variations (e.g., "Ping" -> "ping_ms").
 
-Return ONLY the JSON object with numeric values."""
+REQUIRED OUTPUT SCHEMA (JSON only, no markdown):
+{{
+    "download_mbps": <float or null>,
+    "upload_mbps": <float or null>,
+    "ping_ms": <float or null>,
+    "jitter_ms": <float or null>
+}}"""
 
         json_str = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
         if json_str:
+            self.log(f"[FILL]   AI response: {len(json_str)} chars ({elapsed:.1f}s)")
             result = self._try_direct_parse(json_str, SpeedTestData)
             if result:
-                self.log("[FILL] Speed test schema filled via reasoning model")
+                self.log(f"[FILL] ✓ Speed schema filled ({elapsed:.1f}s)")
                 return result
 
-        self.log("[FILL] ERROR: Could not fill speed test schema")
+        self.log(f"[FILL] ✗ Could not fill speed test schema ({elapsed:.1f}s)")
         return None
 
     def fill_video(self, validated_json: str, provider: LLMProvider) -> Optional[VideoTestData]:
-        """Fill VideoTestData schema from validated data."""
-        self.log("[FILL] Filling video test schema...")
+        """Fill VideoTestData schema using AI Reasoning."""
+        self.log(f"[FILL] Filling VideoTestData (input: {len(validated_json)} chars)...")
+        start = time.time()
 
-        result = self._try_direct_parse(validated_json, VideoTestData)
-        if result:
-            nulls = [k for k, v in result.model_dump().items() if v is None]
-            if nulls:
-                self.log(f"[FILL] WARNING: Video test has null fields: {nulls}")
-            else:
-                self.log(f"[FILL] Video test schema filled successfully")
-            return result
+        prompt = f"""You are a data entry specialist. Map this validated input data into the EXACT VideoTestData schema.
 
-        # Fallback
-        self.log("[FILL] Direct parse failed, using reasoning model...")
-        prompt = f"""Convert this validated video test data into the exact VideoTestData schema.
-
-VALIDATED DATA:
+INPUT DATA:
 {validated_json}
 
-REQUIRED OUTPUT SCHEMA:
+INSTRUCTIONS:
+1. Map input keys to schema keys (e.g., "MAX RESOLUTION" -> "max_resolution").
+2. Ensure format compliance.
+
+REQUIRED OUTPUT SCHEMA (JSON only, no markdown):
 {{
     "max_resolution": "<string: 360p|480p|720p|1080p|1440p|2160p|4K>",
-    "load_time_ms": <float, positive>,
-    "buffering_percentage": <float, 0-100>
-}}
-
-Return ONLY the JSON object."""
+    "load_time_ms": <float or null>,
+    "buffering_percentage": <float or null>
+}}"""
 
         json_str = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
         if json_str:
+            self.log(f"[FILL]   AI response: {len(json_str)} chars ({elapsed:.1f}s)")
             result = self._try_direct_parse(json_str, VideoTestData)
             if result:
-                self.log("[FILL] Video test schema filled via reasoning model")
+                self.log(f"[FILL] ✓ Video schema filled ({elapsed:.1f}s)")
                 return result
 
-        self.log("[FILL] ERROR: Could not fill video test schema")
+        self.log(f"[FILL] ✗ Could not fill video test schema ({elapsed:.1f}s)")
         return None
 
     def fill_voice(self, validated_json: str, provider: LLMProvider) -> Optional[VoiceCallData]:
-        """Fill VoiceCallData schema from validated data."""
-        self.log("[FILL] Filling voice call schema...")
+        """Fill VoiceCallData schema using AI Reasoning."""
+        self.log(f"[FILL] Filling VoiceCallData (input: {len(validated_json)} chars)...")
+        start = time.time()
 
-        result = self._try_direct_parse(validated_json, VoiceCallData)
-        if result:
-            nulls = [k for k, v in result.model_dump().items() if v is None]
-            if nulls:
-                self.log(f"[FILL] WARNING: Voice call has null fields: {nulls}")
-            else:
-                self.log(f"[FILL] Voice call schema filled successfully")
-            return result
+        prompt = f"""You are a data entry specialist. Map this validated input data into the EXACT VoiceCallData schema.
 
-        # Fallback
-        self.log("[FILL] Direct parse failed, using reasoning model...")
-        prompt = f"""Convert this validated voice call data into the exact VoiceCallData schema.
-
-VALIDATED DATA:
+INPUT DATA:
 {validated_json}
 
-REQUIRED OUTPUT SCHEMA:
+INSTRUCTIONS:
+1. Map input keys to schema keys.
+2. Ensure format compliance.
+
+REQUIRED OUTPUT SCHEMA (JSON only, no markdown):
 {{
     "phone_number": "<string, format: (xxx) xxx-xxxx>",
-    "call_duration_seconds": <float, duration in seconds>,
+    "call_duration_seconds": <float or null>,
     "call_status": "<string: Connected|Completed|Failed|Ringing|Dialing>",
     "time": "<string, MM:SS format>"
-}}
-
-Return ONLY the JSON object."""
+}}"""
 
         json_str = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
         if json_str:
+            self.log(f"[FILL]   AI response: {len(json_str)} chars ({elapsed:.1f}s)")
             result = self._try_direct_parse(json_str, VoiceCallData)
             if result:
-                self.log("[FILL] Voice call schema filled via reasoning model")
+                self.log(f"[FILL] ✓ Voice schema filled ({elapsed:.1f}s)")
                 return result
 
-        self.log("[FILL] ERROR: Could not fill voice call schema")
+        self.log(f"[FILL] ✗ Could not fill voice call schema ({elapsed:.1f}s)")
         return None

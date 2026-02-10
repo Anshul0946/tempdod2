@@ -22,21 +22,43 @@ class APIManager:
         self.api_key = api_key
         self.log = logger or (lambda msg: print(msg))
 
+    def _resize_image(self, image_path: str, max_dim: int = 1024) -> Optional[str]:
+        """
+        Resize image to fit within max_dim, return base64 string.
+        Helps prevent 'Image too large' errors from PaddleOCR.
+        """
+        try:
+            from PIL import Image
+            import io
+            
+            with Image.open(image_path) as img:
+                # Convert to RGB if needed
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                
+                # Resize if too large
+                if max(img.size) > max_dim:
+                    ratio = max_dim / max(img.size)
+                    new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
+                    img = img.resize(new_size, Image.Resampling.LANCZOS)
+                    self.log(f"[OCR] Resized large image {Path(image_path).name} to {new_size}")
+                
+                # Save to buffer
+                buf = io.BytesIO()
+                img.save(buf, format="PNG")
+                return base64.b64encode(buf.getvalue()).decode("utf-8")
+        except Exception as e:
+            self.log(f"[OCR] Error resizing image: {e}")
+            return None
+
     # ─── PaddleOCR ───
     def call_paddleocr(self, image_path: str) -> Optional[str]:
         """
         Send image to PaddleOCR API, return extracted text as a single string.
         Returns None on failure.
         """
-        try:
-            with open(image_path, "rb") as f:
-                image_b64 = base64.b64encode(f.read()).decode("utf-8")
-        except Exception as e:
-            self.log(f"[OCR] Cannot read {image_path}: {e}")
-            return None
-
-        if len(image_b64) >= 180_000:
-            self.log(f"[OCR] Image too large for PaddleOCR: {Path(image_path).name}")
+        image_b64 = self._resize_image(image_path)
+        if not image_b64:
             return None
 
         headers = {
@@ -50,10 +72,21 @@ class APIManager:
             }]
         }
 
-        # Two attempts with increasing timeout
-        for attempt, timeout in enumerate([60, 120], 1):
+        # Exponential backoff for 429s
+        max_retries = 5
+        base_delay = 2
+
+        for attempt in range(1, max_retries + 1):
             try:
-                resp = requests.post(OCR_URL, headers=headers, json=payload, timeout=timeout)
+                resp = requests.post(OCR_URL, headers=headers, json=payload, timeout=60)
+                
+                # Handle 429 explicitly
+                if resp.status_code == 429:
+                    wait = base_delay * (2 ** (attempt - 1))
+                    self.log(f"[OCR] Rate limit hit (429). Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -72,19 +105,18 @@ class APIManager:
                 return None
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                if attempt < 2:
-                    self.log(f"[OCR] Timeout attempt {attempt}, retrying...")
-                    time.sleep(2)
-                    continue
-                self.log(f"[OCR] Failed after retries: {e}")
-                return None
+                self.log(f"[OCR] Connection error: {e}. Retrying ({attempt}/{max_retries})...")
+                time.sleep(2)
+                continue
             except requests.exceptions.HTTPError as e:
                 self.log(f"[OCR] HTTP Error: {e}")
-                return None
+                if resp.status_code != 429: 
+                    return None
             except Exception as e:
                 self.log(f"[OCR] Unexpected error: {e}")
                 return None
 
+        self.log(f"[OCR] Failed after {max_retries} retries.")
         return None
 
     # ─── Reasoning LLM ───
@@ -106,9 +138,21 @@ class APIManager:
             "response_format": {"type": "json_object"},
         }
 
-        for attempt, timeout in enumerate([60, 120], 1):
+        # Exponential backoff for 429s
+        max_retries = 5
+        base_delay = 2
+
+        for attempt in range(1, max_retries + 1):
             try:
-                resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+                resp = requests.post(url, headers=headers, json=payload, timeout=120)
+
+                # Handle 429 explicitly
+                if resp.status_code == 429:
+                    wait = base_delay * (2 ** (attempt - 1))
+                    self.log(f"[REASONING] Rate limit hit (429). Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -118,25 +162,18 @@ class APIManager:
                 return None
 
             except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
-                if attempt < 2:
-                    self.log(f"[REASONING] Timeout attempt {attempt}, retrying...")
-                    time.sleep(2)
-                    continue
-                self.log(f"[REASONING] Failed after retries: {e}")
-                return None
+                self.log(f"[REASONING] Connection error: {e}. Retrying ({attempt}/{max_retries})...")
+                time.sleep(2)
+                continue
             except requests.exceptions.HTTPError as e:
-                if hasattr(e, 'response') and 400 <= e.response.status_code < 500 and e.response.status_code != 429:
-                    self.log(f"[REASONING] Client error {e.response.status_code}: {e}")
-                    return None
-                if attempt < 2:
-                    time.sleep(2)
-                    continue
                 self.log(f"[REASONING] HTTP Error: {e}")
-                return None
+                if resp.status_code != 429:
+                    return None
             except Exception as e:
                 self.log(f"[REASONING] Unexpected error: {e}")
                 return None
 
+        self.log(f"[REASONING] Failed after {max_retries} retries.")
         return None
 
     def _extract_json(self, content: str) -> str:

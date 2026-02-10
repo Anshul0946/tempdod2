@@ -4,6 +4,7 @@ Removes noise, extracts telecom-relevant parameters, normalizes labels.
 """
 
 import json
+import time
 from typing import Optional, Dict
 from ..api_manager import APIManager
 from ..config import LLMProvider
@@ -21,6 +22,9 @@ class FiltrationAgent:
 
     def filter_service_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
         """Filter service image OCR text. Returns clean JSON string."""
+        self.log(f"[FILTER] Service filtration starting (input: {len(raw_ocr)} chars)")
+        start = time.time()
+
         prompt = f"""You are an OCR output filtration specialist for cellular network service data.
 
 Your job is to take raw OCR text from a cellular network info screen and extract ONLY the relevant telecom parameters as a clean key-value list.
@@ -46,15 +50,25 @@ RAW OCR TEXT:
 Return ONLY a JSON object like: {{"NR_BAND": "977", "RSRP": "-73", ...}}"""
 
         result = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
+
         if result:
-            self.log(f"[FILTER] Service: extracted parameters from OCR")
+            # Count extracted parameters
+            try:
+                param_count = len(json.loads(result))
+                self.log(f"[FILTER] ✓ Service: extracted {param_count} parameters ({elapsed:.1f}s)")
+            except:
+                self.log(f"[FILTER] ✓ Service: got response ({len(result)} chars, {elapsed:.1f}s)")
         else:
-            self.log(f"[FILTER] ERROR: Service filtration failed. Raw OCR len: {len(raw_ocr)}")
-            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
+            self.log(f"[FILTER] ✗ Service filtration FAILED ({elapsed:.1f}s)")
+            self.log(f"[FILTER]   Input OCR preview: {raw_ocr[:200]}...")
         return result
 
     def filter_speed_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
         """Filter speed test OCR text. Returns clean JSON string."""
+        self.log(f"[FILTER] Speed filtration starting (input: {len(raw_ocr)} chars)")
+        start = time.time()
+
         prompt = f"""You are an OCR output filtration specialist for network speed test results.
 
 Extract ONLY speed test parameters from this raw OCR text.
@@ -78,15 +92,24 @@ RAW OCR TEXT:
 Return ONLY a JSON object like: {{"Download Mbps": "382", "Upload Mbps": "95.2", "Ping": "44", "Jitter": "7"}}"""
 
         result = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
+
         if result:
-            self.log(f"[FILTER] Speed: extracted parameters from OCR")
+            try:
+                param_count = len(json.loads(result))
+                self.log(f"[FILTER] ✓ Speed: extracted {param_count} parameters ({elapsed:.1f}s)")
+            except:
+                self.log(f"[FILTER] ✓ Speed: got response ({len(result)} chars, {elapsed:.1f}s)")
         else:
-            self.log(f"[FILTER] ERROR: Speed filtration failed. Raw OCR len: {len(raw_ocr)}")
-            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
+            self.log(f"[FILTER] ✗ Speed filtration FAILED ({elapsed:.1f}s)")
+            self.log(f"[FILTER]   Input OCR preview: {raw_ocr[:200]}...")
         return result
 
     def filter_video_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
         """Filter video test OCR text. Returns clean JSON string."""
+        self.log(f"[FILTER] Video filtration starting (input: {len(raw_ocr)} chars)")
+        start = time.time()
+
         prompt = f"""You are an OCR output filtration specialist for video streaming test results.
 
 Extract ONLY video test parameters from this raw OCR text.
@@ -106,15 +129,24 @@ RAW OCR TEXT:
 Return ONLY a JSON object like: {{"MAX RESOLUTION": "2160p", "Load Time": "985", "Buffering": "0"}}"""
 
         result = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
+
         if result:
-            self.log(f"[FILTER] Video: extracted parameters from OCR")
+            try:
+                param_count = len(json.loads(result))
+                self.log(f"[FILTER] ✓ Video: extracted {param_count} parameters ({elapsed:.1f}s)")
+            except:
+                self.log(f"[FILTER] ✓ Video: got response ({len(result)} chars, {elapsed:.1f}s)")
         else:
-            self.log(f"[FILTER] ERROR: Video filtration failed. Raw OCR len: {len(raw_ocr)}")
-            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
+            self.log(f"[FILTER] ✗ Video filtration FAILED ({elapsed:.1f}s)")
+            self.log(f"[FILTER]   Input OCR preview: {raw_ocr[:200]}...")
         return result
 
     def filter_voice_text(self, raw_ocr: str, provider: LLMProvider) -> Optional[str]:
         """Filter voice call OCR text. Returns clean JSON string."""
+        self.log(f"[FILTER] Voice filtration starting (input: {len(raw_ocr)} chars)")
+        start = time.time()
+
         prompt = f"""You are an OCR output filtration specialist for voice call screen data.
 
 Extract voice call parameters from this raw OCR text.
@@ -135,9 +167,15 @@ RAW OCR TEXT:
 Return ONLY a JSON object like: {{"phone_number": "(312) 774-3128", "call_duration_seconds": "12", "call_status": "Connected", "time": "00:12"}}"""
 
         result = self.api.call_reasoning(prompt, provider)
+        elapsed = time.time() - start
+
         if result:
-            self.log(f"[FILTER] Voice: extracted parameters from OCR")
+            try:
+                param_count = len(json.loads(result))
+                self.log(f"[FILTER] ✓ Voice: extracted {param_count} parameters ({elapsed:.1f}s)")
+            except:
+                self.log(f"[FILTER] ✓ Voice: got response ({len(result)} chars, {elapsed:.1f}s)")
         else:
-            self.log(f"[FILTER] ERROR: Voice filtration failed. Raw OCR len: {len(raw_ocr)}")
-            self.log(f"[DEBUG] Raw OCR: {raw_ocr[:200]}...")
+            self.log(f"[FILTER] ✗ Voice filtration FAILED ({elapsed:.1f}s)")
+            self.log(f"[FILTER]   Input OCR preview: {raw_ocr[:200]}...")
         return result
